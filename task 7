@@ -1,0 +1,99 @@
+import re, random, time
+def norm_number(raw):
+    d = re.sub(r"\D", "", raw)          # keep digits only
+    if len(d) > 10 and d.startswith("91"):
+        d = d[-10:]                     # drop country code
+    if len(d) == 11 and d.startswith("0"):
+        d = d[1:]                       # drop trunk 0
+    return d if len(d) == 10 else ""
+def norm_name(raw):
+    s = re.sub(r"[^\w\s]", " ", raw.lower())
+    words = [w for w in s.split() if w not in {"dr", "mr", "mrs", "ms", "prof", "sri"}]
+    return " ".join(words)
+def merge(contacts):
+    """contacts: list of dicts {name, phones:[...], emails:[...]} -> list of merged people"""
+    owner = {}              # normalised number -> index in people
+    people = []
+    for c in contacts:
+        nums = {n for n in (norm_number(p) for p in c.get("phones", [])) if n}
+        mails = {e.strip().lower() for e in c.get("emails", []) if e.strip()}
+        hits = {owner[n] for n in nums if n in owner}
+        if hits:
+            i = min(hits)
+            for j in hits - {i}:                        # one contact bridges two people: join them
+                people[i]["numbers"] |= people[j]["numbers"]
+                people[i]["emails"] |= people[j]["emails"]
+                people[i]["names"] |= people[j]["names"]
+                for n in people[j]["numbers"]:
+                    owner[n] = i
+                people[j] = None
+        else:
+            i = len(people)
+            people.append({"names": set(), "numbers": set(), "emails": set()})
+        p = people[i]
+        p["numbers"] |= nums; p["emails"] |= mails
+        if norm_name(c.get("name", "")):
+            p["names"].add(c["name"].strip())
+        for n in nums:
+            owner[n] = i
+    return [p for p in people if p is not None]
+def show(ms):
+    for p in sorted(ms, key=lambda p: sorted(p["numbers"])):
+        print("  ", sorted(p["names"]), sorted(p["numbers"]), sorted(p["emails"]))
+phone1 = [{"name": "Dr. Ravi", "phones": ["+91 98400 12345"], "emails": []},
+          {"name": "Anitha", "phones": ["044-2345 6789"], "emails": ["anitha@mail.com"]}]
+phone2 = [{"name": "ravi kumar", "phones": ["9840012345", "+91 90030 55555"], "emails": ["Ravi@Mail.com"]},
+          {"name": "Priya", "phones": ["98765 43210"], "emails": []}]
+sim = [{"name": "Ravi K", "phones": ["09840012345"], "emails": ["ravi@mail.com"]},
+       {"name": "Priya S", "phones": ["+91-98765-43210"], "emails": ["priya@x.com"]},
+       {"name": "Raja", "phones": ["99999 11111"], "emails": []},
+       {"name": "Raja", "phones": ["88888 22222"], "emails": []},     # same name, different person
+       {"name": "NoPhone", "phones": [], "emails": ["np@x.com"]},        # missing field
+       {"name": "", "phones": ["70000 11111"], "emails": []}]            # missing name
+allc = phone1 + phone2 + sim
+print("normalisation tests:")
+for r in ["+91 98400 12345", "9840012345", "09840012345", "+91-98765-43210", "12345", ""]:
+    print(f"  {r!r:22} -> {norm_number(r)!r}")
+for r in ["Dr. Ravi", "ravi kumar", "  Mrs. Priya S. "]:
+    print(f"  {r!r:22} -> {norm_name(r)!r}")
+print("\nmerged result (", len(allc), "input contacts ->", end=" ")
+res = merge(allc)
+print(len(res), "people ):")
+show(res)
+print("\n--- bridging contact ---")
+b = merge([{"name": "A", "phones": ["9000000001"]}, {"name": "B", "phones": ["9000000002"]},
+           {"name": "A/B", "phones": ["9000000001", "9000000002"]}])
+print(len(b), "person ->"); show(b)
+def merge_pairwise(contacts):
+    """Compare EVERY pair of contacts (i, j); join them if they share a normalised number."""
+    nums = [{n for n in (norm_number(p) for p in c.get("phones", [])) if n} for c in contacts]
+    parent = list(range(len(contacts)))
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]; x = parent[x]
+        return x
+    for i in range(len(contacts)):
+        for j in range(i + 1, len(contacts)):          # n(n-1)/2 comparisons
+            if nums[i] & nums[j]:
+                parent[find(j)] = find(i)
+    return len({find(i) for i in range(len(contacts)) if nums[i]}) + sum(1 for x in nums if not x)
+def gen(n, seed=11):
+    random.seed(seed)
+    out = []
+    people = max(1, int(n * 0.6))
+    nums = [str(random.randint(6_000_000_000, 9_999_999_999)) for _ in range(people)]
+    for _ in range(n):
+        k = random.randrange(people); d = nums[k]
+        fmt = random.choice([d, "+91 " + d[:5] + " " + d[5:], "0" + d, "+91-" + d])
+        out.append({"name": f"Person{k}", "phones": [fmt], "emails": [f"p{k}@mail.com"] if random.random() < .5 else []})
+    return out, people
+print("\n--- timing (seconds) ---")
+print(f"{'contacts':>9} {'dictionary':>11} {'all pairs':>10} {'pairs compared':>15} {'people':>8} {'same answer':>12}")
+for n in (1000, 2000, 4000, 100_000):
+    cs, _ = gen(n)
+    t = time.perf_counter(); r = merge(cs); t1 = time.perf_counter() - t
+    if n <= 4000:
+        t = time.perf_counter(); pc = merge_pairwise(cs); t2 = time.perf_counter() - t
+        print(f"{n:>9} {t1:>11.4f} {t2:>10.3f} {n*(n-1)//2:>15} {len(r):>8} {str(pc == len(r)):>12}")
+    else:
+        print(f"{n:>9} {t1:>11.4f} {'not run':>10} {n*(n-1)//2:>15} {len(r):>8} {'-':>12}")
