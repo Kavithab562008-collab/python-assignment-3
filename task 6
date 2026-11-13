@@ -1,0 +1,84 @@
+import random, time, sys
+def hm(t):  # "HH:MM" -> minutes
+    h, m = t.split(":"); return int(h) * 60 + int(m)
+timetable = {
+ "12621": {"name": "Tamil Nadu Express", "route": [("Chennai Central", "--", "22:00"), ("Vijayawada", "02:20", "02:30"), ("New Delhi", "07:05", "--")], "days": {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}},
+ "12007": {"name": "Shatabdi Express", "route": [("Chennai Central", "--", "06:00"), ("Katpadi", "07:40", "07:42"), ("Mysuru", "13:05", "--")], "days": {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}},
+ "12163": {"name": "Chennai Express", "route": [("Mumbai LTT", "--", "21:35"), ("Katpadi", "13:10", "13:12"), ("Chennai Central", "15:30", "--")], "days": {"Mon", "Wed", "Fri"}},
+ "12695": {"name": "Trivandrum Express", "route": [("Chennai Central", "--", "17:45"), ("Katpadi", "19:50", "19:52"), ("Thiruvananthapuram", "07:15", "--")], "days": {"Tue", "Thu", "Sun"}},
+ "12657": {"name": "Bengaluru Mail", "route": [("Chennai Central", "--", "22:35"), ("Katpadi", "00:20", "00:22"), ("Bengaluru", "05:00", "--")], "days": {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}},
+}
+print("TIMETABLE")
+print(f"{'No':6}{'Name':22}{'Days':30}Route")
+for no, t in timetable.items():
+    print(f"{no:6}{t['name']:22}{','.join(sorted(t['days'])):30}{' -> '.join(s for s, _, _ in t['route'])}")
+print("\nsecond station of 12621 -> departure:", timetable["12621"]["route"][1][2], "| third station arrival:", timetable["12621"]["route"][2][1])
+print("expression for third station departure: timetable['12621']['route'][2][2] ->", timetable["12621"]["route"][2][2], "(terminus, no departure)")
+def dep_at(train, station):
+    for s, a, d in train["route"]:
+        if s == station:
+            return d
+    return None
+def query(tt, station, day):
+    found = []
+    for no, t in tt.items():                     # scan every train
+        if day in t["days"]:
+            d = dep_at(t, station)
+            if d is not None:
+                found.append((no, t["name"], d))
+    return sorted(found, key=lambda r: hm(r[2]) if r[2] != "--" else 10**6)
+def build_index(tt):
+    idx = {}
+    for no, t in tt.items():
+        for s, a, d in t["route"]:
+            idx.setdefault(s, []).append(no)
+    return idx
+def query_indexed(tt, idx, station, day):
+    found = []
+    for no in idx.get(station, []):
+        t = tt[no]
+        if day in t["days"]:
+            found.append((no, t["name"], dep_at(t, station)))
+    return sorted(found, key=lambda r: hm(r[2]) if r[2] != "--" else 10**6)
+print("\ntrains at Katpadi on Mon sorted by departure:")
+for r in query(timetable, "Katpadi", "Mon"):
+    print("  ", r)
+idx = build_index(timetable)
+print("indexed query same:", query_indexed(timetable, idx, "Katpadi", "Mon") == query(timetable, "Katpadi", "Mon"))
+print("unknown station   :", query(timetable, "Atlantis", "Mon"))
+print("Katpadi on Sun (12163 does not run, so it is left out):", query(timetable, "Katpadi", "Sun"))
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+def gen(n, seed=7, nst=300):
+    random.seed(seed)
+    stations = [f"Stn{i}" for i in range(nst)]
+    tt = {}
+    for i in range(n):
+        stops = random.sample(stations, 8)
+        route = [(s, f"{random.randint(0,23):02d}:{random.randint(0,59):02d}", f"{random.randint(0,23):02d}:{random.randint(0,59):02d}") for s in stops]
+        tt[str(10000 + i)] = {"name": f"Train{i}", "route": route, "days": set(random.sample(DAYS, random.randint(2, 7)))}
+    return tt
+def deep_size(o, seen=None):
+    seen = seen if seen is not None else set()
+    if id(o) in seen: return 0
+    seen.add(id(o)); s = sys.getsizeof(o)
+    if isinstance(o, dict): s += sum(deep_size(k, seen) + deep_size(v, seen) for k, v in o.items())
+    elif isinstance(o, (list, tuple, set)): s += sum(deep_size(x, seen) for x in o)
+    return s
+print("\n--- 200 station queries (seconds) ---")
+print(f"{'trains':>7} {'no index':>10} {'index':>10} {'build idx':>10} {'index KB':>9} {'timetable KB':>13}")
+for n in (100, 1000, 10000):
+    tt = gen(n)
+    qs = [(f"Stn{random.randint(0,299)}", random.choice(DAYS)) for _ in range(200)]
+    t = time.perf_counter(); a = [query(tt, s, d) for s, d in qs]; t1 = time.perf_counter() - t
+    t = time.perf_counter(); ix = build_index(tt); tb = time.perf_counter() - t
+    t = time.perf_counter(); b = [query_indexed(tt, ix, s, d) for s, d in qs]; t2 = time.perf_counter() - t
+    assert a == b
+    print(f"{n:>7} {t1:>10.4f} {t2:>10.5f} {tb:>10.4f} {deep_size(ix)/1024:>9.1f} {deep_size(tt)/1024:>13.1f}")
+print("\n--- flat list of tuples alternative, 10000 trains, 200 queries ---")
+tt = gen(10000)
+flat = [(no, s, a, d, t["days"]) for no, t in tt.items() for s, a, d in t["route"]]
+qs = [(f"Stn{random.randint(0,299)}", random.choice(DAYS)) for _ in range(200)]
+t = time.perf_counter()
+for s, dday in qs:
+    r = sorted([(no, d) for no, st, a, d, days in flat if st == s and dday in days], key=lambda x: hm(x[1]))
+print("flat scan:", round(time.perf_counter() - t, 4), "s for", len(flat), "stop records; flat KB:", round(deep_size(flat) / 1024, 1))
