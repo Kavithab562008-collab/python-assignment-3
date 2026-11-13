@@ -1,0 +1,86 @@
+import random, time
+from collections import deque
+import bisect
+random.seed(42)
+def make_readings(n):
+    # about 40% dry days, other days 0.5-60 mm
+    return [0.0 if random.random() < 0.4 else round(random.uniform(0.5, 60), 1) for _ in range(n)]
+def weekly_totals(r):
+    return [round(sum(r[i:i + 7]), 1) for i in range(0, len(r) - len(r) % 7, 7)]
+def moving_avg_naive(r):
+    return [sum(r[i:i + 7]) / 7 for i in range(len(r) - 6)]
+def moving_avg_running(r):
+    if len(r) < 7:
+        return []
+    s = sum(r[:7])
+    out = [s / 7]
+    for i in range(7, len(r)):
+        s += r[i] - r[i - 7]
+        out.append(s / 7)
+    return out
+def moving_avg_deque(r):
+    w, s, out = deque(maxlen=7), 0.0, []
+    for x in r:
+        if len(w) == 7:
+            s -= w[0]
+        w.append(x)
+        s += x
+        if len(w) == 7:
+            out.append(s / 7)
+    return out
+readings = make_readings(365)
+totals = weekly_totals(readings)
+print("Number of full weeks:", len(totals), "| leftover days:", len(readings) % 7)
+print("First 5 weekly totals:", totals[:5])
+mx, mn = max(totals), min(totals)
+print("Wettest week: week", totals.index(mx) + 1, "total", mx, "mm")
+print("Driest week : week", totals.index(mn) + 1, "total", mn, "mm")
+hi = max(readings); lo = min(readings)
+print("Max daily reading:", hi, "on day", readings.index(hi) + 1)
+print("Min daily reading:", lo, "on day", readings.index(lo) + 1)
+dry = [i + 1 for i, x in enumerate(readings) if x == 0]
+print("Dry days:", len(dry), "first 10:", dry[:10])
+ma = moving_avg_running(readings)
+print("Moving average values:", len(ma), "first 3:", [round(x, 2) for x in ma[:3]])
+print("\n--- slicing demo on first 21 readings ---")
+d = readings[:21]
+print("d[7:14]  =", d[7:14])
+print("d[-7:]   =", d[-7:])
+print("d[::7]   =", d[::7])
+print("\n--- correctness: all three agree ---")
+a, b, c = moving_avg_naive(readings), moving_avg_running(readings), moving_avg_deque(readings)
+print(len(a) == len(b) == len(c), all(abs(x - y) < 1e-9 for x, y in zip(a, b)), all(abs(x - y) < 1e-9 for x, y in zip(a, c)))
+print("\n--- edge cases ---")
+print("empty list      ->", weekly_totals([]), moving_avg_naive([]), moving_avg_running([]), moving_avg_deque([]))
+print("5 readings      ->", weekly_totals([1, 2, 3, 4, 5]), moving_avg_naive([1, 2, 3, 4, 5]), moving_avg_running([1, 2, 3, 4, 5]))
+print("exactly 7       ->", weekly_totals([1] * 7), moving_avg_naive([1] * 7), moving_avg_running([1] * 7))
+print("\n--- timing (seconds, best of 3) ---")
+print(f"{'n':>8} {'naive':>10} {'running':>10} {'deque':>10}")
+for n in (365, 36500, 365000):
+    r = make_readings(n)
+    res = []
+    for f in (moving_avg_naive, moving_avg_running, moving_avg_deque):
+        best = 1e9
+        for _ in range(3):
+            t = time.perf_counter(); f(r); best = min(best, time.perf_counter() - t)
+        res.append(best)
+    print(f"{n:>8} {res[0]:>10.5f} {res[1]:>10.5f} {res[2]:>10.5f}")
+print("\n--- operation counts (additions/subtractions) ---")
+for n in (365, 36500, 365000):
+    print(f"n={n}: naive = 6*(n-6) = {6*(n-6)}, running = 6 + 2*(n-7) = {6+2*(n-7)}")
+print("\n--- late reading insertion cost ---")
+for n in (36500, 365000):
+    r = list(range(n))
+    t = time.perf_counter()
+    for _ in range(200):
+        r.insert(0, -1)          # worst case: front
+    t1 = (time.perf_counter() - t) / 200
+    r = list(range(n))
+    t = time.perf_counter()
+    for _ in range(200):
+        r.append(-1)             # end
+    t2 = (time.perf_counter() - t) / 200
+    print(f"n={n}: insert(0) {t1*1e6:.1f} us per call, append {t2*1e6:.2f} us per call")
+dates = [1, 2, 3, 5, 6]
+bisect.insort(dates, 4)
+print("bisect.insort late day 4 ->", dates)
