@@ -1,0 +1,65 @@
+import random, time, sys
+def make(n, seed=5):
+    random.seed(seed)
+    out = []
+    for _ in range(n):
+        r = random.random()
+        if r < 0.03:
+            out.append(random.choice([-80.0, 75.0, 99.0]))     # sensor errors
+        else:
+            out.append(round(random.uniform(0, 12), 1))        # normal cold-storage range
+    return out
+LOW, HIGH = -50, 50
+def v_loop(rd):
+    c, f = [], []
+    for x in rd:
+        if LOW <= x <= HIGH:
+            c.append(x)
+            f.append(x * 9 / 5 + 32)
+    return c, f
+def v_comp(rd):
+    c = [x for x in rd if LOW <= x <= HIGH]
+    f = [x * 9 / 5 + 32 for x in c]
+    return c, f
+def v_mapfilter(rd):
+    c = list(filter(lambda x: LOW <= x <= HIGH, rd))
+    f = list(map(lambda x: x * 9 / 5 + 32, c))
+    return c, f
+def alarms(rd):
+    return [i for i, x in enumerate(rd,start=1) if LOW <= x <= HIGH and not (2 <= x <= 8)]
+small = [4.5, 99.0, 1.2, 8.0, -80.0, 9.5, 2.0, 5.5]
+print("sample readings:", small)
+print("loop       :", v_loop(small))
+print("comp       :", v_comp(small))
+print("map/filter :", v_mapfilter(small))
+print("alarm minutes (enumerate):", alarms(small))
+print("identical:", v_loop(small) == v_comp(small) == v_mapfilter(small))
+print("\n--- dictionary and set comprehensions ---")
+print("dict minute->C :", {i: x for i, x in enumerate(small) if LOW <= x <= HIGH})
+print("set of distinct valid temps:", {x for x in small if LOW <= x <= HIGH})
+print("\n--- edge cases ---")
+allvalid = [3.0, 4.0, 5.0]; allbad = [99.0, -70.0, 120.0]
+print("all valid  ->", v_comp(allvalid)[0], "alarms:", alarms(allvalid))
+print("all invalid->", v_comp(allbad), "alarms:", alarms(allbad))
+print("empty      ->", v_comp([]), alarms([]))
+print("\n--- timing (seconds, best of 3) ---")
+def best(f, k=3):
+    m = 1e9
+    for _ in range(k):
+        t = time.perf_counter(); f(); m = min(m, time.perf_counter() - t)
+    return m
+print(f"{'n':>9} {'for+append':>11} {'comprehension':>14} {'map/filter':>11}  identical")
+for n in (10_000, 100_000, 1_000_000):
+    rd = make(n)
+    a, b, c = best(lambda: v_loop(rd)), best(lambda: v_comp(rd)), best(lambda: v_mapfilter(rd))
+    print(f"{n:>9} {a:>11.4f} {b:>14.4f} {c:>11.4f}  {v_loop(rd) == v_comp(rd) == v_mapfilter(rd)}")
+print("\n--- memory (1,000,000 readings) ---")
+rd = make(1_000_000)
+lst = [x for x in rd if LOW <= x <= HIGH]
+gen = (x for x in rd if LOW <= x <= HIGH)
+print("list comprehension :", sys.getsizeof(lst), "bytes")
+print("generator expression:", sys.getsizeof(gen), "bytes")
+print("sum via list:", round(sum(lst), 1), "| sum via generator:", round(sum(x for x in rd if LOW <= x <= HIGH), 1))
+print("time sum(list comp)  :", round(best(lambda: sum([x for x in rd if LOW <= x <= HIGH])), 4), "s")
+print("time sum(generator)  :", round(best(lambda: sum(x for x in rd if LOW <= x <= HIGH)), 4), "s")
+g = (x for x in range(3)); print("generator used once:", list(g), list(g))
